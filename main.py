@@ -91,6 +91,10 @@ def run_discord_bot():
     bot.run(DISCORD_TOKEN)
 
 if __name__ == "__main__":
-    threading.Thread(target=run_discord_bot, daemon=True).start()
-    port = int(os.environ.get('PORT', 10000))
+    # 啟動 Discord bot 在背景執行
+    discord_thread = threading.Thread(target=run_discord_bot, daemon=True)
+    discord_thread.start()
+    
+    # 啟動 Flask
+    port = int(os.environ.get('PORT', 8000))
     app.run(host='0.0.0.0', port=port) 
