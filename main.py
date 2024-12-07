@@ -3,9 +3,15 @@ from discord.ext import commands
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
-from linebot.models import MessageEvent, TextMessage
+from linebot.models import (
+    MessageEvent, TextMessage, TextSendMessage,
+    JoinEvent, LeaveEvent
+)
 import os
 from config import *
+
+# 新增這個字典
+line_groups = {}
 
 # 設定 Discord 機器人
 intents = discord.Intents.default()
@@ -23,11 +29,24 @@ app = Flask(__name__)
 def hello():
     return 'Bot is running!'
 
+# Discord -> Line
 @bot.event
-async def on_ready():
-    print(f'Bot logged in as {bot.user}')
-    await bot.load_extension('cogs.line_bridge')
+async def on_message(message):
+    # 避免機器人回應自己的訊息
+    if message.author == bot.user:
+        return
+    
+    # 確認是否來自指定頻道
+    if message.channel.id == int(DISCORD_CHANNEL_ID):
+        try:
+            # 改用 broadcast 直接發送給所有訂閱者
+            line_bot_api.broadcast(
+                TextSendMessage(text=f"Discord - {message.author.name}: {message.content}")
+            )
+        except Exception as e:
+            print(f"Error sending to Line groups: {e}")
 
+# Line -> Discord
 @app.route("/callback", methods=['POST'])
 def callback():
     signature = request.headers['X-Line-Signature']
@@ -41,13 +60,32 @@ def callback():
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    channel = bot.get_channel(DISCORD_CHANNEL_ID)
+    channel = bot.get_channel(int(DISCORD_CHANNEL_ID))
     if channel:
-        discord.utils.get_running_loop().create_task(
-            channel.send(f"Line - {event.source.user_id}: {event.message.text}")
-        )
+        if event.source.type == 'group':
+            group_id = event.source.group_id
+            try:
+                # 取得群組資訊
+                group_summary = line_bot_api.get_group_summary(group_id)
+                group_name = group_summary.group_name
+                # 發送到 Discord
+                discord.utils.get_running_loop().create_task(
+                    channel.send(f"Line群組「{group_name}」: {event.message.text}")
+                )
+            except Exception as e:
+                print(f"Error sending to Discord: {e}")
+        elif event.source.type == 'user':
+            try:
+                # 取得用戶資料
+                profile = line_bot_api.get_profile(event.source.user_id)
+                user_name = profile.display_name
+                discord.utils.get_running_loop().create_task(
+                    channel.send(f"Line - {user_name}: {event.message.text}")
+                )
+            except Exception as e:
+                print(f"Error sending to Discord: {e}")
 
-# 啟動 Discord 機��人
+# 啟動 Discord 機器人
 import threading
 def run_discord_bot():
     bot.run(DISCORD_TOKEN)
