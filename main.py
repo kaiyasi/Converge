@@ -45,8 +45,35 @@ class ChatState:
         self.histories = {}
         self.last_interaction = {}
         self.daily_usage = {}
-        self.processing = set()  # 追蹤正在處理的訊息
-        self.last_message = {}   # 加入這個屬性
+        self.processing = set()
+        self.last_message = {}
+        self.line_quota_exceeded = False
+        self.request_count = 0  # 追蹤請求次數
+        self.last_request_time = time.time()
+    
+    def can_make_request(self):
+        # 重置計數器（每分鐘）
+        current_time = time.time()
+        if current_time - self.last_request_time >= 60:
+            self.request_count = 0
+            self.last_request_time = current_time
+        
+        # 檢查請求限制（每分鐘最多30次）
+        return self.request_count < 30
+    
+    def increment_request(self):
+        self.request_count += 1
+        
+    def is_similar_message(self, user_id, message):
+        # 檢查訊息相似度（避免輕微變化的重複訊息）
+        if user_id in self.last_message:
+            last_msg = self.last_message[user_id]
+            # 如果兩條訊息長度相差不大且有高度重疊
+            if abs(len(message) - len(last_msg)) <= 5:
+                common_chars = sum(1 for a, b in zip(message, last_msg) if a == b)
+                similarity = common_chars / max(len(message), len(last_msg))
+                return similarity > 0.8
+        return False
     
     def is_processing(self, user_id):
         return user_id in self.processing
@@ -108,24 +135,33 @@ model = genai.GenerativeModel('gemini-pro')
 # AI 回應功能
 async def get_ai_response(user_id, message):
     try:
-        # 只檢查重複訊息
-        if chat_state.is_duplicate_message(user_id, message):
-            return None  # 重複訊息不回應
+        # 檢查請求限制
+        if not chat_state.can_make_request():
+            return "系統正忙，請稍後再試。"
+        
+        # 檢查訊息相似度
+        if chat_state.is_similar_message(user_id, message):
+            return None
         
         # 更新最後訊息
         chat_state.update_last_message(user_id, message)
         
         # 檢查使用限制
         if not chat_state.can_use_ai(user_id):
-            return (
-                "抱歉，您今日的 AI 對話次數已達上限。\n"
-                "配額將於明日重置。\n"
-                "感謝您的理解！"
-            )
+            return "今日 AI 對話次數已達上限，明日重置。"
+        
+        # 增加請求計數
+        chat_state.increment_request()
         
         # 生成回應
         response = model.generate_content(
-            f"請用繁體中文回答以下問題，並保持回答簡潔：\n{message}"
+            f"請用繁體中文回答以下問題，保持簡潔：\n{message}",
+            generation_config={
+                "temperature": 0.7,
+                "top_p": 0.8,
+                "top_k": 40,
+                "max_output_tokens": 200,
+            }
         )
         
         # 增加使用次數
@@ -135,7 +171,7 @@ async def get_ai_response(user_id, message):
         
     except Exception as e:
         app.logger.error(f"AI 回應錯誤：{str(e)}")
-        return "抱歉，AI 助手暫時無法回應。請稍後再試。"
+        return "AI 助手暫時無法回應，請稍後再試。"
 
 # Discord 事件處理
 @bot.event
@@ -251,50 +287,53 @@ def callback():
 def handle_message(event):
     if isinstance(event.message, TextMessageContent):
         try:
+            if chat_state.line_quota_exceeded and event.source.type == 'user':
+                app.logger.warning("LINE API 配額已用完")
+                return
+            
             if event.source.type == 'user':
                 user_id = event.source.user_id
                 
-                # 如果正在處理該用戶的訊息，直接返回
                 if chat_state.is_processing(user_id):
                     return
                 
                 chat_state.start_processing(user_id)
                 
                 try:
-                    app.logger.info(f"收到私人訊息：{event.message.text}")
+                    message = event.message.text.strip()
+                    if not message:  # 忽略空白訊息
+                        return
+                        
+                    app.logger.info(f"處理用戶訊息：{user_id}")
                     
-                    profile = line_bot_api.get_profile(user_id)
-                    user_name = profile.display_name
+                    response = asyncio.run(get_ai_response(user_id, message))
                     
-                    response = asyncio.run(get_ai_response(user_id, event.message.text))
-                    
-                    # 只有在有回應時才發送
                     if response:
-                        request = PushMessageRequest(
-                            to=user_id,
-                            messages=[
-                                TextMessage(
-                                    type='text',
-                                    text=(
-                                        "🤖 AI 助手\n"
-                                        f"👋 Hi, {user_name}!\n"
-                                        f"📝 {response}"
+                        try:
+                            request = PushMessageRequest(
+                                to=user_id,
+                                messages=[
+                                    TextMessage(
+                                        type='text',
+                                        text=f"🤖 {response}"
                                     )
-                                )
-                            ]
-                        )
-                        line_bot_api.push_message(request)
-                        app.logger.info(f"已發送 AI 回應給用戶：{user_id}")
+                                ]
+                            )
+                            line_bot_api.push_message(request)
+                            
+                        except Exception as e:
+                            if "429" in str(e) or "monthly limit" in str(e).lower():
+                                chat_state.line_quota_exceeded = True
+                            raise e
                 
                 finally:
-                    # 確保一定會結束處理狀態
                     chat_state.end_processing(user_id)
                     
             elif event.source.type == 'group':
                 handle_group_message(event)
                 
         except Exception as e:
-            app.logger.error(f"處理訊息時發生錯誤：{str(e)}")
+            app.logger.error(f"訊息處理錯誤：{str(e)}")
             if event.source.type == 'user':
                 chat_state.end_processing(event.source.user_id)
 
