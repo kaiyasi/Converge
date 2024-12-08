@@ -56,54 +56,22 @@ async def on_message(message):
                     if group and 'id' in group:
                         app.logger.info(f"發送訊息到群組：{group['id']}")
                         try:
-                            # 建立 PushMessageRequest 物件
+                            formatted_message = (
+                                "💬 Discord\n"
+                                f"👤 {message.author.name}\n"
+                                f"📝 {message.content}"
+                            )
+                            
                             request = PushMessageRequest(
                                 to=group['id'],
-                                messages=[
-                                    TextMessage(
-                                        type='text',
-                                        text=f"Discord - {message.author.name}: {message.content}"
-                                    )
-                                ]
+                                messages=[TextMessage(type='text', text=formatted_message)]
                             )
-                            # 發送訊息
                             response = line_bot_api.push_message(request)
                             app.logger.info(f"訊息發送成功：{response}")
                         except Exception as e:
                             app.logger.error(f"發送訊息失敗：{str(e)}")
-                            app.logger.error(f"請求內容：{request}")
-            else:
-                app.logger.warning("沒有活躍的 Line 群組")
         except Exception as e:
-            app.logger.error(f"發送到 Line 時發生錯誤：{str(e)}")
-            app.logger.error(f"錯誤詳情：{type(e).__name__}")
-
-# Line -> Discord
-@app.route("/callback", methods=['POST'])
-def callback():
-    # 獲取 X-Line-Signature header 值
-    signature = request.headers.get('X-Line-Signature', '')
-    body = request.get_data(as_text=True)
-    app.logger.info(f"收到 webhook 請求，簽名：{signature}")
-    app.logger.info(f"請求內容：{body}")
-    
-    try:
-        # 確認 Channel Secret 是否正確設定
-        app.logger.info(f"使用的 Channel Secret: {os.getenv('LINE_CHANNEL_SECRET')[:5]}...")
-        
-        # 驗證簽名
-        handler.handle(body, signature)
-        
-    except InvalidSignatureError:
-        app.logger.error(f"簽名驗證失敗")
-        app.logger.error(f"收到的簽名: {signature}")
-        abort(400)
-        
-    except Exception as e:
-        app.logger.error(f"處理 webhook 時發生錯誤：{str(e)}")
-        return str(e), 500
-        
-    return 'OK', 200
+            app.logger.error(f"處理 Discord 訊息時發生錯誤：{str(e)}")
 
 @handler.add(MessageEvent)
 def handle_message(event):
@@ -118,19 +86,18 @@ def handle_message(event):
                 )
                 user_name = profile.display_name
                 
-                # 更新群組資訊
-                if group_id not in line_groups['active_groups']:
-                    group_summary = line_bot_api.get_group_summary(group_id=group_id)
-                    line_groups['active_groups'][group_id] = {
-                        'id': group_id,
-                        'name': group_summary.group_name
-                    }
-                    app.logger.info(f"新增群組：{group_summary.group_name}")
-                
                 # 發送到 Discord
                 channel = bot.get_channel(int(os.getenv('DISCORD_CHANNEL_ID')))
                 if channel:
-                    message_text = f"Line - {user_name}: {event.message.text}"
+                    # 美化 Line 到 Discord 的訊息
+                    message_text = (
+                        "```\n"
+                        "📱 LINE\n"
+                        f"👤 {user_name}\n"
+                        f"📝 {event.message.text}\n"
+                        "```"
+                    )
+                    
                     future = asyncio.run_coroutine_threadsafe(
                         channel.send(message_text),
                         bot.loop
@@ -172,7 +139,7 @@ async def on_ready():
             await channel.send("機器人已上線！")
             if line_groups['default']:
                 group_summary = line_bot_api.get_group_summary(group_id=line_groups['default'])
-                await channel.send(f"預設Line群組：{group_summary.group_name}")
+                await channel.send(f"���設Line群組：{group_summary.group_name}")
     except Exception as e:
         print(f"初始化時發生錯誤：{str(e)}")
 
