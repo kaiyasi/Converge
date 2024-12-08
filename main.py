@@ -46,6 +46,7 @@ class ChatState:
         self.last_interaction = {}
         self.daily_usage = {}
         self.processing = set()  # 追蹤正在處理的訊息
+        self.last_message = {}   # 加入這個屬性
     
     def is_processing(self, user_id):
         return user_id in self.processing
@@ -57,7 +58,6 @@ class ChatState:
         self.processing.discard(user_id)
     
     def is_duplicate_message(self, user_id, message):
-        # 檢查是否與上一條訊息完全相同
         return (user_id in self.last_message and 
                 self.last_message[user_id] == message)
     
