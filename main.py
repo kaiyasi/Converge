@@ -42,19 +42,12 @@ async def on_message(message):
     # 確認是否來自指定頻道
     if message.channel.id == int(DISCORD_CHANNEL_ID):
         try:
-            # 發送訊息到所有活躍的 Line 群組
-            for group in line_groups['active_groups'].values():
-                line_bot_api.push_message(
-                    group['id'],
-                    TextSendMessage(text=f"Discord - {message.author.name}: {message.content}")
-                )
-            # 同時也發送到預設群組（如果有設定的話）
-            if line_groups['default']:
-                line_bot_api.push_message(
-                    line_groups['default'],
-                    TextSendMessage(text=f"Discord - {message.author.name}: {message.content}")
-                )
-            print(f"已發送到 Line 群組: Discord - {message.author.name}: {message.content}")  # 除錯用
+            # 送訊息到 Line 群組
+            line_bot_api.push_message(
+                line_groups['default'],
+                TextSendMessage(text=f"Discord - {message.author.name}: {message.content}")
+            )
+            print(f"已發送到 Line: Discord - {message.author.name}: {message.content}")  # 除錯用
         except Exception as e:
             print(f"Error sending to Line: {e}")  # 錯誤記錄
 
@@ -154,10 +147,11 @@ def run_discord_bot():
     bot.run(DISCORD_TOKEN)
 
 if __name__ == "__main__":
-    # 啟動 Discord bot 在背景行
+    # 啟動 Discord bot 在背景執行
     discord_thread = threading.Thread(target=run_discord_bot, daemon=True)
     discord_thread.start()
     
-    # 啟動 Flask
-    port = int(os.environ.get('PORT', 8000))
-    app.run(host='0.0.0.0', port=port) 
+    # 修改 Flask 啟動設定
+    port = int(os.environ.get('PORT', 5000))  # 改用 5000 端口
+    print(f'正在啟動 Flask 伺服器於端口 {port}...')
+    app.run(host='0.0.0.0', port=port, debug=False)  # 關閉 debug 模式 
