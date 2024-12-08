@@ -2,9 +2,14 @@ import os
 import asyncio
 from flask import Flask, request, abort
 from linebot.v3 import WebhookHandler
-from linebot.v3.messaging import MessagingApi, ApiClient, Configuration
+from linebot.v3.messaging import (
+    MessagingApi, 
+    ApiClient, 
+    Configuration,
+    PushMessageRequest,
+    TextMessage
+)
 from linebot.v3.webhooks import MessageEvent, TextMessageContent, JoinEvent, LeaveEvent
-from linebot.v3.messaging import TextMessage
 from linebot.v3.exceptions import InvalidSignatureError
 import discord
 from discord.ext import commands
@@ -51,8 +56,8 @@ async def on_message(message):
                     if group and 'id' in group:
                         app.logger.info(f"發送訊息到群組：{group['id']}")
                         try:
-                            # 直接使用 push_message 方法
-                            line_bot_api.push_message(
+                            # 建立 PushMessageRequest 物件
+                            request = PushMessageRequest(
                                 to=group['id'],
                                 messages=[
                                     TextMessage(
@@ -61,9 +66,12 @@ async def on_message(message):
                                     )
                                 ]
                             )
-                            app.logger.info("訊息發送成功")
+                            # 發送訊息
+                            response = line_bot_api.push_message(request)
+                            app.logger.info(f"訊息發送成功：{response}")
                         except Exception as e:
                             app.logger.error(f"發送訊息失敗：{str(e)}")
+                            app.logger.error(f"請求內容：{request}")
             else:
                 app.logger.warning("沒有活躍的 Line 群組")
         except Exception as e:
@@ -172,7 +180,7 @@ async def on_ready():
 def run_discord_bot():
     bot.run(os.getenv('DISCORD_TOKEN'))
 
-# 新增��個測試路由
+# 新增一個測試路由
 @app.route("/callback", methods=['GET'])
 def callback_test():
     return 'Webhook is working!', 200
