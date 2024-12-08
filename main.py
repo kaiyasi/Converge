@@ -48,8 +48,28 @@ class ChatState:
         self.processing = set()
         self.last_message = {}
         self.line_quota_exceeded = False
-        self.request_count = 0  # 追蹤請求次數
-        self.last_request_time = time.time()
+        self.monthly_message_count = 0  # 追蹤每月訊息數
+        self.monthly_reset_date = None  # 月重置日期
+    
+    def check_monthly_reset(self):
+        # 檢查是否需要重置月計數
+        current_date = time.strftime('%Y-%m')
+        if self.monthly_reset_date != current_date:
+            self.monthly_reset_date = current_date
+            self.monthly_message_count = 0
+            self.line_quota_exceeded = False
+            self.quota_notice_sent = False
+    
+    def increment_message_count(self):
+        self.check_monthly_reset()
+        self.monthly_message_count += 1
+        # 接近限制時提前警告
+        if self.monthly_message_count >= 450:  # 90% 的限制
+            app.logger.warning(f"接近月訊息限制：{self.monthly_message_count}/500")
+        return self.monthly_message_count < 500
+
+    def get_remaining_quota(self):
+        return max(0, 500 - self.monthly_message_count)
     
     def can_make_request(self):
         # 重置計數器（每分鐘）
@@ -222,7 +242,7 @@ async def on_message(message):
                         messages = []
                         
                         if message.content:
-                            formatted_text = f"(Discord) - {message.author.name} - {message.content}"
+                            formatted_text = f"Discord - {message.author.name} - {message.content}"
                             messages.append(TextMessage(type='text', text=formatted_text))
                         
                         for attachment in message.attachments:
@@ -287,31 +307,32 @@ def callback():
 def handle_message(event):
     if isinstance(event.message, TextMessageContent):
         try:
-            if chat_state.line_quota_exceeded and event.source.type == 'user':
-                app.logger.warning("LINE API 配額已用完")
-                return
-            
             if event.source.type == 'user':
-                user_id = event.source.user_id
+                # 檢查配額
+                if not chat_state.increment_message_count():
+                    chat_state.line_quota_exceeded = True
+                    remaining = chat_state.get_remaining_quota()
+                    app.logger.warning(f"本月剩餘配額：{remaining}")
+                    # ... 其他處理邏輯 ...
                 
-                if chat_state.is_processing(user_id):
+                if chat_state.is_processing(event.source.user_id):
                     return
                 
-                chat_state.start_processing(user_id)
+                chat_state.start_processing(event.source.user_id)
                 
                 try:
                     message = event.message.text.strip()
                     if not message:  # 忽略空白訊息
                         return
                         
-                    app.logger.info(f"處理用戶訊息：{user_id}")
+                    app.logger.info(f"處理用戶訊息：{event.source.user_id}")
                     
-                    response = asyncio.run(get_ai_response(user_id, message))
+                    response = asyncio.run(get_ai_response(event.source.user_id, message))
                     
                     if response:
                         try:
                             request = PushMessageRequest(
-                                to=user_id,
+                                to=event.source.user_id,
                                 messages=[
                                     TextMessage(
                                         type='text',
@@ -327,7 +348,7 @@ def handle_message(event):
                             raise e
                 
                 finally:
-                    chat_state.end_processing(user_id)
+                    chat_state.end_processing(event.source.user_id)
                     
             elif event.source.type == 'group':
                 handle_group_message(event)
@@ -348,7 +369,7 @@ def handle_group_message(event):
         
         channel = bot.get_channel(int(os.getenv('DISCORD_CHANNEL_ID')))
         if channel:
-            message_text = f"(LINE) - {user_name} - {event.message.text}"
+            message_text = f"LINE - {user_name} - {event.message.text}"
             
             future = asyncio.run_coroutine_threadsafe(
                 channel.send(message_text),
