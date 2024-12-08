@@ -35,21 +35,24 @@ def hello():
 # Discord -> Line
 @bot.event
 async def on_message(message):
-    # 避免機器人回應自己的訊息
     if message.author == bot.user:
         return
     
-    # 確認是否來自指定頻道
     if message.channel.id == int(DISCORD_CHANNEL_ID):
         try:
-            # 送訊息到 Line 群組
-            line_bot_api.push_message(
-                line_groups['default'],
-                TextSendMessage(text=f"Discord - {message.author.name}: {message.content}")
-            )
-            print(f"已發送到 Line: Discord - {message.author.name}: {message.content}")  # 除錯用
+            # 檢查活躍群組
+            if line_groups['active_groups']:
+                for group in line_groups['active_groups'].values():
+                    if group and 'id' in group:  # 確保群組資訊完整
+                        print(f"正在發送訊息到群組：{group['id']}")  # 除錯用
+                        line_bot_api.push_message(
+                            to=group['id'],  # 明確指定 to 參數
+                            messages=TextSendMessage(text=f"Discord - {message.author.name}: {message.content}")
+                        )
+            else:
+                print("警告：沒有活躍的 Line 群組")
         except Exception as e:
-            print(f"Error sending to Line: {e}")  # 錯誤記錄
+            print(f"發送到 Line 時發生錯誤：{str(e)}")
 
 # Line -> Discord
 @app.route("/callback", methods=['POST'])
@@ -67,23 +70,29 @@ def callback():
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    print(f"處理訊息事件：{event}")
+    print(f"收到 Line 訊息：{event.message.text}")  # 除錯用
+    
     if event.source.type == 'group':
         group_id = event.source.group_id
-        print(f"來自群組：{group_id}")
         try:
-            # 嘗試取得群組資訊
-            group_summary = line_bot_api.get_group_summary(group_id)
-            print(f"群組資訊：{group_summary.group_name}")
-            
+            # 更新群組資訊
             if group_id not in line_groups['active_groups']:
+                group_summary = line_bot_api.get_group_summary(group_id)
                 line_groups['active_groups'][group_id] = {
                     'id': group_id,
                     'name': group_summary.group_name
                 }
-                print(f"新增群組到清單：{group_id}")
+                print(f"已新增群組：{group_summary.group_name}")
+            
+            # 發送到 Discord
+            channel = bot.get_channel(int(DISCORD_CHANNEL_ID))
+            if channel:
+                # 使用 create_task 而不是直接呼叫
+                discord.utils.get_running_loop().create_task(
+                    channel.send(f"Line - {event.message.text}")
+                )
         except Exception as e:
-            print(f"Error in handle_message: {e}")  # 錯誤記錄
+            print(f"處理 Line 訊息時發生錯誤：{str(e)}")
 
 @handler.add(JoinEvent)
 def handle_join(event):
