@@ -35,21 +35,29 @@ def hello():
 # Discord -> Line
 @bot.event
 async def on_message(message):
-    # 避免機器人回應自己的訊息
     if message.author == bot.user:
         return
     
-    # 確認是否來自指定頻道
     if message.channel.id == int(DISCORD_CHANNEL_ID):
         try:
-            # 送訊息到 Line 群組
-            line_bot_api.push_message(
-                line_groups['default'],
-                TextSendMessage(text=f"Discord - {message.author.name}: {message.content}")
-            )
-            print(f"已發送到 Line: Discord - {message.author.name}: {message.content}")  # 除錯用
+            # 檢查是否有活躍的群組
+            if line_groups['active_groups']:
+                for group in line_groups['active_groups'].values():
+                    if group['id']:  # 確保群組 ID 存在
+                        line_bot_api.push_message(
+                            group['id'],
+                            TextSendMessage(text=f"Discord - {message.author.name}: {message.content}")
+                        )
+            # 檢查預設群組
+            elif line_groups['default']:
+                line_bot_api.push_message(
+                    line_groups['default'],
+                    TextSendMessage(text=f"Discord - {message.author.name}: {message.content}")
+                )
+            else:
+                print("警告：沒有可用的 Line 群組")
         except Exception as e:
-            print(f"Error sending to Line: {e}")  # 錯誤記錄
+            print(f"發送到 Line 時發生錯誤：{e}")
 
 # Line -> Discord
 @app.route("/callback", methods=['POST'])
@@ -128,18 +136,15 @@ def handle_leave(event):
 async def on_ready():
     print(f'Discord 機器人已登入為 {bot.user}')
     try:
-        # 獲取所有 Line 群組清單
-        groups = line_bot_api.get_groups()
         channel = bot.get_channel(int(DISCORD_CHANNEL_ID))
-        
         if channel:
-            await channel.send("機器人已上線！以下是所有Line群組資訊：")
-            for group in groups:
-                group_summary = line_bot_api.get_group_summary(group.group_id)
-                await channel.send(f"群組名稱：{group_summary.group_name}\n群組ID：{group.group_id}")
-                print(f"群組名稱：{group_summary.group_name}, 群組ID：{group.group_id}")
+            await channel.send("機器人已上線！")
+            # 如果有預設群組，顯示其資訊
+            if line_groups['default']:
+                group_summary = line_bot_api.get_group_summary(line_groups['default'])
+                await channel.send(f"預設Line群組：{group_summary.group_name}")
     except Exception as e:
-        print(f"獲取Line群組資訊時發生錯誤：{e}")
+        print(f"初始化時發生錯誤：{e}")
 
 # 啟動 Discord 機器人
 import threading
@@ -152,6 +157,6 @@ if __name__ == "__main__":
     discord_thread.start()
     
     # 修改 Flask 啟動設定
-    port = int(os.environ.get('PORT', 5000))  # 改用 5000 端口
+    port = int(os.environ.get('PORT', 5000))  # 改用 5000 端���
     print(f'正在啟動 Flask 伺服器於端口 {port}...')
     app.run(host='0.0.0.0', port=port, debug=False)  # 關閉 debug 模式 
