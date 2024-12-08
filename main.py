@@ -17,7 +17,6 @@ from linebot.v3.messaging import (
 from linebot.v3.exceptions import InvalidSignatureError
 import discord
 from discord.ext import commands
-from openai import OpenAI
 import google.generativeai as genai
 
 # Flask 應用
@@ -33,8 +32,6 @@ configuration = Configuration(access_token=os.getenv('LINE_CHANNEL_ACCESS_TOKEN'
 handler = WebhookHandler(os.getenv('LINE_CHANNEL_SECRET'))
 line_bot_api = MessagingApi(ApiClient(configuration))
 
-# OpenAI 設定
-client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
 # 全域變數
 line_groups = {
