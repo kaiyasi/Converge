@@ -35,29 +35,21 @@ def hello():
 # Discord -> Line
 @bot.event
 async def on_message(message):
+    # 避免機器人回應自己的訊息
     if message.author == bot.user:
         return
     
+    # 確認是否來自指定頻道
     if message.channel.id == int(DISCORD_CHANNEL_ID):
         try:
-            # 檢查是否有活躍的群組
-            if line_groups['active_groups']:
-                for group in line_groups['active_groups'].values():
-                    if group['id']:  # 確保群組 ID 存在
-                        line_bot_api.push_message(
-                            group['id'],
-                            TextSendMessage(text=f"Discord - {message.author.name}: {message.content}")
-                        )
-            # 檢查預設群組
-            elif line_groups['default']:
-                line_bot_api.push_message(
-                    line_groups['default'],
-                    TextSendMessage(text=f"Discord - {message.author.name}: {message.content}")
-                )
-            else:
-                print("警告：沒有可用的 Line 群組")
+            # 送訊息到 Line 群組
+            line_bot_api.push_message(
+                line_groups['default'],
+                TextSendMessage(text=f"Discord - {message.author.name}: {message.content}")
+            )
+            print(f"已發送到 Line: Discord - {message.author.name}: {message.content}")  # 除錯用
         except Exception as e:
-            print(f"發送到 Line 時發生錯誤：{e}")
+            print(f"Error sending to Line: {e}")  # 錯誤記錄
 
 # Line -> Discord
 @app.route("/callback", methods=['POST'])
@@ -73,23 +65,12 @@ def callback():
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    if event.source.type == 'group':
-        group_id = event.source.group_id
-        # 如果群組不在清單中，就加入
-        if group_id not in line_groups['active_groups']:
-            line_groups['active_groups'][group_id] = {
-                'id': group_id,
-                'name': line_bot_api.get_group_summary(group_id).group_name
-            }
-            print(f"新增群組：{group_id}")
-    
     try:
-        # 取得 Discord 頻道
-        channel = bot.get_channel(int(DISCORD_CHANNEL_ID))
-        if channel:
-            if event.source.type == 'group':
-                group_id = event.source.group_id
-                print(f"Line Group ID: {group_id}")  # 這行會印出群組 ID
+        if event.source.type == 'group':
+            group_id = event.source.group_id
+            if group_id not in line_groups['active_groups']:
+                print(f"警告：群組 {group_id} 未註冊為活躍群組")
+            else:
                 # 取得群組和發送者資訊
                 group_summary = line_bot_api.get_group_summary(group_id)
                 group_name = group_summary.group_name
@@ -98,17 +79,9 @@ def handle_message(event):
                 
                 # 發送到 Discord，包群組和發送者資訊
                 message = f"Line群組「{group_name}」- {user_name}: {event.message.text}"
+                channel = bot.get_channel(int(DISCORD_CHANNEL_ID))
                 discord.utils.get_running_loop().create_task(channel.send(message))
                 print(f"已發送到 Discord: {message}")  # 除錯用
-            
-            elif event.source.type == 'user':
-                # 處理私人訊息
-                profile = line_bot_api.get_profile(event.source.user_id)
-                user_name = profile.display_name
-                message = f"Line - {user_name}: {event.message.text}"
-                discord.utils.get_running_loop().create_task(channel.send(message))
-                print(f"已發送到 Discord: {message}")  # 除錯用
-    
     except Exception as e:
         print(f"Error in handle_message: {e}")  # 錯誤記錄
 
@@ -116,12 +89,14 @@ def handle_message(event):
 def handle_join(event):
     if event.source.type == 'group':
         group_id = event.source.group_id
-        # 加入新群組時更新群組清單
-        line_groups['active_groups'][group_id] = {
-            'id': group_id,
-            'name': line_bot_api.get_group_summary(group_id).group_name
-        }
-        print(f"已加入新群組：{group_id}")
+        if group_id not in line_groups['active_groups']:
+            line_groups['active_groups'][group_id] = {
+                'id': group_id,
+                'name': line_bot_api.get_group_summary(group_id).group_name
+            }
+            print(f"已加入新群組：{group_id}")
+        else:
+            print(f"群組已存在：{group_id}")
 
 @handler.add(LeaveEvent)
 def handle_leave(event):
@@ -138,7 +113,7 @@ async def on_ready():
     try:
         channel = bot.get_channel(int(DISCORD_CHANNEL_ID))
         if channel:
-            await channel.send("機器人已上線！")
+            await channel.send("機器人已上��！")
             # 如果有預設群組，顯示其資訊
             if line_groups['default']:
                 group_summary = line_bot_api.get_group_summary(line_groups['default'])
@@ -157,6 +132,6 @@ if __name__ == "__main__":
     discord_thread.start()
     
     # 修改 Flask 啟動設定
-    port = int(os.environ.get('PORT', 5000))  # 改用 5000 端���
+    port = int(os.environ.get('PORT', 5000))  # 改用 5000 端口
     print(f'正在啟動 Flask 伺服器於端口 {port}...')
     app.run(host='0.0.0.0', port=port, debug=False)  # 關閉 debug 模式 
