@@ -56,34 +56,34 @@ async def on_message(message):
 def callback():
     signature = request.headers['X-Line-Signature']
     body = request.get_data(as_text=True)
+    print(f"收到 LINE Webhook 請求：{body}")
 
     try:
         handler.handle(body, signature)
     except InvalidSignatureError:
+        print("無效的簽名")
         abort(400)
     return 'OK'
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    try:
-        if event.source.type == 'group':
-            group_id = event.source.group_id
+    print(f"處理訊息事件：{event}")
+    if event.source.type == 'group':
+        group_id = event.source.group_id
+        print(f"來自群組：{group_id}")
+        try:
+            # 嘗試取得群組資訊
+            group_summary = line_bot_api.get_group_summary(group_id)
+            print(f"群組資訊：{group_summary.group_name}")
+            
             if group_id not in line_groups['active_groups']:
-                print(f"警告：群組 {group_id} 未註冊為活躍群組")
-            else:
-                # 取得群組和發送者資訊
-                group_summary = line_bot_api.get_group_summary(group_id)
-                group_name = group_summary.group_name
-                profile = line_bot_api.get_group_member_profile(group_id, event.source.user_id)
-                user_name = profile.display_name
-                
-                # 發送到 Discord，包群組和發送者資訊
-                message = f"Line群組「{group_name}」- {user_name}: {event.message.text}"
-                channel = bot.get_channel(int(DISCORD_CHANNEL_ID))
-                discord.utils.get_running_loop().create_task(channel.send(message))
-                print(f"已發送到 Discord: {message}")  # 除錯用
-    except Exception as e:
-        print(f"Error in handle_message: {e}")  # 錯誤記錄
+                line_groups['active_groups'][group_id] = {
+                    'id': group_id,
+                    'name': group_summary.group_name
+                }
+                print(f"新增群組到清單：{group_id}")
+        except Exception as e:
+            print(f"Error in handle_message: {e}")  # 錯誤記錄
 
 @handler.add(JoinEvent)
 def handle_join(event):
@@ -113,7 +113,7 @@ async def on_ready():
     try:
         channel = bot.get_channel(int(DISCORD_CHANNEL_ID))
         if channel:
-            await channel.send("機器人已上��！")
+            await channel.send("機器人已上線！")
             # 如果有預設群組，顯示其資訊
             if line_groups['default']:
                 group_summary = line_bot_api.get_group_summary(line_groups['default'])
