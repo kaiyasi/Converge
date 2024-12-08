@@ -46,6 +46,23 @@ class ChatState:
     def __init__(self):
         self.histories = {}
         self.last_interaction = {}
+        self.daily_usage = {}  # 追蹤每個用戶的每日使用次數
+    
+    def can_use_ai(self, user_id):
+        # 檢查是否超過每日限制
+        today = time.strftime('%Y-%m-%d')
+        if today not in self.daily_usage:
+            self.daily_usage = {today: {}}
+        
+        if user_id not in self.daily_usage[today]:
+            self.daily_usage[today][user_id] = 0
+            
+        # 設定每人每日限制次數（例如：20次）
+        return self.daily_usage[today][user_id] < 20
+    
+    def increment_usage(self, user_id):
+        today = time.strftime('%Y-%m-%d')
+        self.daily_usage[today][user_id] += 1
     
     def get_history(self, user_id):
         current_time = time.time()
@@ -71,6 +88,14 @@ chat_state = ChatState()
 # AI 回應功能
 async def get_ai_response(user_id, message):
     try:
+        # 檢查使用限制
+        if not chat_state.can_use_ai(user_id):
+            return (
+                "抱歉，您今日的 AI 對話次數已達上限。\n"
+                "配額將於明日重置。\n"
+                "感謝您的理解！"
+            )
+            
         chat_state.add_message(user_id, "user", message)
         
         messages = [
@@ -80,18 +105,29 @@ async def get_ai_response(user_id, message):
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=messages,
-            max_tokens=500,
+            max_tokens=300,  # 減少 token 使用量
             temperature=0.7
         )
         
         ai_response = response.choices[0].message.content
         chat_state.add_message(user_id, "assistant", ai_response)
         
+        # 增加使用次數
+        chat_state.increment_usage(user_id)
+        
         return ai_response
         
     except Exception as e:
         app.logger.error(f"AI 回應錯誤：{str(e)}")
-        return "抱歉，我現在無法回應。請稍後再試。"
+        
+        if "insufficient_quota" in str(e):
+            return (
+                "抱歉，AI 服務目前額度暫時用完。\n"
+                "請稍後再試。\n"
+                "您可以繼續使用其他功能！"
+            )
+        
+        return "抱歉，AI 助手暫時無法回應。請稍後再試。"
 
 # Discord 事件處理
 @bot.event
