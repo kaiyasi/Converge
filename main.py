@@ -44,7 +44,27 @@ class ChatState:
     def __init__(self):
         self.histories = {}
         self.last_interaction = {}
-        self.daily_usage = {}  # 追蹤每個用戶的每日使用次數
+        self.daily_usage = {}
+        self.cooldowns = {}  # 新增冷卻時間追蹤
+    
+    def is_in_cooldown(self, user_id):
+        # 檢查是否在冷卻時間內（30秒）
+        if user_id in self.cooldowns:
+            elapsed = time.time() - self.cooldowns[user_id]
+            return elapsed < 30
+        return False
+    
+    def set_cooldown(self, user_id):
+        # 設定冷卻時間
+        self.cooldowns[user_id] = time.time()
+    
+    def get_remaining_cooldown(self, user_id):
+        # 取得剩餘冷卻時間
+        if user_id in self.cooldowns:
+            elapsed = time.time() - self.cooldowns[user_id]
+            remaining = max(0, 30 - elapsed)
+            return int(remaining)
+        return 0
     
     def can_use_ai(self, user_id):
         # 檢查是否超過每日限制
@@ -90,6 +110,11 @@ model = genai.GenerativeModel('gemini-pro')
 # AI 回應功能
 async def get_ai_response(user_id, message):
     try:
+        # 檢查冷卻時間
+        if chat_state.is_in_cooldown(user_id):
+            remaining = chat_state.get_remaining_cooldown(user_id)
+            return f"請稍等 {remaining} 秒後再發送新的問題。"
+        
         # 檢查使用限制
         if not chat_state.can_use_ai(user_id):
             return (
@@ -103,6 +128,9 @@ async def get_ai_response(user_id, message):
             f"請用繁體中文回答以下問題，並保持回答簡潔：\n{message}"
         )
         
+        # 設定冷卻時間
+        chat_state.set_cooldown(user_id)
+        
         # 增加使用次數
         chat_state.increment_usage(user_id)
         
@@ -110,14 +138,6 @@ async def get_ai_response(user_id, message):
         
     except Exception as e:
         app.logger.error(f"AI 回應錯誤：{str(e)}")
-        
-        if "quota" in str(e).lower():
-            return (
-                "抱歉，AI 服務目前額度暫時用完。\n"
-                "請稍後再試。\n"
-                "您可以繼續使用其他功能！"
-            )
-        
         return "抱歉，AI 助手暫時無法回應。請稍後再試。"
 
 # Discord 事件處理
@@ -169,11 +189,7 @@ async def on_message(message):
                         messages = []
                         
                         if message.content:
-                            formatted_text = (
-                                "💬 Discord\n"
-                                f"👤 {message.author.name}\n"
-                                f"📝 {message.content}"
-                            )
+                            formatted_text = f"(Discord) - {message.author.name} - {message.content}"
                             messages.append(TextMessage(type='text', text=formatted_text))
                         
                         for attachment in message.attachments:
@@ -280,13 +296,7 @@ def handle_group_message(event):
         
         channel = bot.get_channel(int(os.getenv('DISCORD_CHANNEL_ID')))
         if channel:
-            message_text = (
-                "```\n"
-                "📱 LINE\n"
-                f"👤 {user_name}\n"
-                f"📝 {event.message.text}\n"
-                "```"
-            )
+            message_text = f"(LINE) - {user_name} - {event.message.text}"
             
             future = asyncio.run_coroutine_threadsafe(
                 channel.send(message_text),
