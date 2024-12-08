@@ -45,26 +45,15 @@ class ChatState:
         self.histories = {}
         self.last_interaction = {}
         self.daily_usage = {}
-        self.cooldowns = {}  # 新增冷卻時間追蹤
+        self.last_message = {}  # 只記錄最後一條訊息
     
-    def is_in_cooldown(self, user_id):
-        # 檢查是否在冷卻時間內（30秒）
-        if user_id in self.cooldowns:
-            elapsed = time.time() - self.cooldowns[user_id]
-            return elapsed < 30
-        return False
+    def is_duplicate_message(self, user_id, message):
+        # 檢查是否與上一條訊息完全相同
+        return (user_id in self.last_message and 
+                self.last_message[user_id] == message)
     
-    def set_cooldown(self, user_id):
-        # 設定冷卻時間
-        self.cooldowns[user_id] = time.time()
-    
-    def get_remaining_cooldown(self, user_id):
-        # 取得剩餘冷卻時間
-        if user_id in self.cooldowns:
-            elapsed = time.time() - self.cooldowns[user_id]
-            remaining = max(0, 30 - elapsed)
-            return int(remaining)
-        return 0
+    def update_last_message(self, user_id, message):
+        self.last_message[user_id] = message
     
     def can_use_ai(self, user_id):
         # 檢查是否超過每日限制
@@ -110,10 +99,12 @@ model = genai.GenerativeModel('gemini-pro')
 # AI 回應功能
 async def get_ai_response(user_id, message):
     try:
-        # 檢查冷卻時間
-        if chat_state.is_in_cooldown(user_id):
-            remaining = chat_state.get_remaining_cooldown(user_id)
-            return f"請稍等 {remaining} 秒後再發送新的問題。"
+        # 只檢查重複訊息
+        if chat_state.is_duplicate_message(user_id, message):
+            return None  # 重複訊息不回應
+        
+        # 更新最後訊息
+        chat_state.update_last_message(user_id, message)
         
         # 檢查使用限制
         if not chat_state.can_use_ai(user_id):
@@ -127,9 +118,6 @@ async def get_ai_response(user_id, message):
         response = model.generate_content(
             f"請用繁體中文回答以下問題，並保持回答簡潔：\n{message}"
         )
-        
-        # 設定冷卻時間
-        chat_state.set_cooldown(user_id)
         
         # 增加使用次數
         chat_state.increment_usage(user_id)
