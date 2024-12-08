@@ -18,6 +18,7 @@ from linebot.v3.exceptions import InvalidSignatureError
 import discord
 from discord.ext import commands
 from openai import OpenAI
+import google.generativeai as genai
 
 # Flask 應用
 app = Flask(__name__)
@@ -85,6 +86,10 @@ class ChatState:
 
 chat_state = ChatState()
 
+# 初始化 Gemini
+genai.configure(api_key=os.getenv('GOOGLE_API_KEY'))
+model = genai.GenerativeModel('gemini-pro')
+
 # AI 回應功能
 async def get_ai_response(user_id, message):
     try:
@@ -95,32 +100,21 @@ async def get_ai_response(user_id, message):
                 "配額將於明日重置。\n"
                 "感謝您的理解！"
             )
-            
-        chat_state.add_message(user_id, "user", message)
         
-        messages = [
-            {"role": "system", "content": "你是一個友善的AI助手。請用繁體中文回答，並保持回答簡潔。"}
-        ] + chat_state.get_history(user_id)
-        
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=messages,
-            max_tokens=300,  # 減少 token 使用量
-            temperature=0.7
+        # 生成回應
+        response = model.generate_content(
+            f"請用繁體中文回答以下問題，並保持回答簡潔：\n{message}"
         )
-        
-        ai_response = response.choices[0].message.content
-        chat_state.add_message(user_id, "assistant", ai_response)
         
         # 增加使用次數
         chat_state.increment_usage(user_id)
         
-        return ai_response
+        return response.text
         
     except Exception as e:
         app.logger.error(f"AI 回應錯誤：{str(e)}")
         
-        if "insufficient_quota" in str(e):
+        if "quota" in str(e).lower():
             return (
                 "抱歉，AI 服務目前額度暫時用完。\n"
                 "請稍後再試。\n"
