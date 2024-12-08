@@ -1,12 +1,11 @@
 import discord
 from discord.ext import commands
 from flask import Flask, request, abort
-from linebot import LineBotApi, WebhookHandler
-from linebot.exceptions import InvalidSignatureError
-from linebot.models import (
-    MessageEvent, TextMessage, TextSendMessage,
-    JoinEvent, LeaveEvent
-)
+from linebot.v3 import WebhookHandler
+from linebot.v3.messaging import MessagingApi, ApiClient, Configuration
+from linebot.v3.webhooks import MessageEvent, TextMessageContent, JoinEvent, LeaveEvent
+from linebot.v3.messaging import TextMessage
+from linebot.v3.exceptions import InvalidSignatureError
 import os
 from config import *
 import asyncio
@@ -22,9 +21,10 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-# 設定 Line 機器人
-line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
+# 修改 Line Bot 設定
+configuration = Configuration(access_token=LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
+line_bot_api = MessagingApi(ApiClient(configuration))
 
 # 設定 Flask
 app = Flask(__name__)
@@ -41,14 +41,13 @@ async def on_message(message):
     
     if message.channel.id == int(DISCORD_CHANNEL_ID):
         try:
-            # 檢查活躍群組
             if line_groups['active_groups']:
                 for group in line_groups['active_groups'].values():
-                    if group and 'id' in group:  # 確保群組資訊完整
-                        print(f"正在發送訊息到群組：{group['id']}")  # 除錯用
+                    if group and 'id' in group:
+                        print(f"正在發送訊息到群組：{group['id']}")
                         line_bot_api.push_message(
-                            to=group['id'],  # 明確指定 to 參數
-                            messages=TextSendMessage(text=f"Discord - {message.author.name}: {message.content}")
+                            to=group['id'],
+                            messages=[TextMessage(text=f"Discord - {message.author.name}: {message.content}")]
                         )
             else:
                 print("警告：沒有活躍的 Line 群組")
@@ -69,46 +68,41 @@ def callback():
         abort(400)
     return 'OK'
 
-@handler.add(MessageEvent, message=TextMessage)
+@handler.add(MessageEvent)
 def handle_message(event):
-    print(f"收到 Line 訊息：{event.message.text}")  # 除錯用
-    
-    if event.source.type == 'group':
-        group_id = event.source.group_id
-        try:
-            # 取得發送者資訊
-            profile = line_bot_api.get_group_member_profile(group_id, event.source.user_id)
-            user_name = profile.display_name
-            
-            # 更新群組資訊（如果需要）
-            if group_id not in line_groups['active_groups']:
-                group_summary = line_bot_api.get_group_summary(group_id)
-                line_groups['active_groups'][group_id] = {
-                    'id': group_id,
-                    'name': group_summary.group_name
-                }
-                print(f"已新增群組：{group_summary.group_name}")
-            
-            # 準備要發送到 Discord 的訊息
-            message_text = f"Line - {user_name}: {event.message.text}"
-            
-            # 發送到 Discord
-            channel = bot.get_channel(int(DISCORD_CHANNEL_ID))
-            if channel:
-                # 使用異步方式發送訊息
-                future = asyncio.run_coroutine_threadsafe(
-                    channel.send(message_text),
-                    bot.loop
+    if isinstance(event.message, TextMessageContent):
+        if event.source.type == 'group':
+            group_id = event.source.group_id
+            try:
+                # 取得發送者資訊
+                profile = line_bot_api.get_group_member_profile(
+                    group_id=group_id,
+                    user_id=event.source.user_id
                 )
-                # 等待訊息發送完成
-                future.result()
-                print(f"已發送到 Discord: {message_text}")
-            
-        except Exception as e:
-            print(f"處理 Line 訊息時發生錯誤：{str(e)}")
-            print(f"錯誤類型：{type(e)}")
-            import traceback
-            print(f"錯誤追蹤：{traceback.format_exc()}")
+                user_name = profile.display_name
+                
+                # 更新群組資訊
+                if group_id not in line_groups['active_groups']:
+                    group_summary = line_bot_api.get_group_summary(group_id=group_id)
+                    line_groups['active_groups'][group_id] = {
+                        'id': group_id,
+                        'name': group_summary.group_name
+                    }
+                    print(f"已新增群組：{group_summary.group_name}")
+                
+                # 發送到 Discord
+                channel = bot.get_channel(int(DISCORD_CHANNEL_ID))
+                if channel:
+                    message_text = f"Line - {user_name}: {event.message.text}"
+                    future = asyncio.run_coroutine_threadsafe(
+                        channel.send(message_text),
+                        bot.loop
+                    )
+                    future.result()
+                    print(f"已發送到 Discord: {message_text}")
+                
+            except Exception as e:
+                print(f"處理 Line 訊息時發生錯誤：{str(e)}")
 
 @handler.add(JoinEvent)
 def handle_join(event):
@@ -139,12 +133,11 @@ async def on_ready():
         channel = bot.get_channel(int(DISCORD_CHANNEL_ID))
         if channel:
             await channel.send("機器人已上線！")
-            # 如果有預設群組，顯示其資訊
             if line_groups['default']:
-                group_summary = line_bot_api.get_group_summary(line_groups['default'])
+                group_summary = line_bot_api.get_group_summary(group_id=line_groups['default'])
                 await channel.send(f"預設Line群組：{group_summary.group_name}")
     except Exception as e:
-        print(f"初始化時發生錯誤：{e}")
+        print(f"初始化時發生錯誤：{str(e)}")
 
 # 啟動 Discord 機器人
 import threading
