@@ -9,6 +9,7 @@ from linebot.models import (
 )
 import os
 from config import *
+import asyncio
 
 # 修改全域字典，用來儲存所有 Line 群組資訊
 line_groups = {
@@ -75,7 +76,11 @@ def handle_message(event):
     if event.source.type == 'group':
         group_id = event.source.group_id
         try:
-            # 更新群組資訊
+            # 取得發送者資訊
+            profile = line_bot_api.get_group_member_profile(group_id, event.source.user_id)
+            user_name = profile.display_name
+            
+            # 更新群組資訊（如果需要）
             if group_id not in line_groups['active_groups']:
                 group_summary = line_bot_api.get_group_summary(group_id)
                 line_groups['active_groups'][group_id] = {
@@ -84,15 +89,26 @@ def handle_message(event):
                 }
                 print(f"已新增群組：{group_summary.group_name}")
             
+            # 準備要發送到 Discord 的訊息
+            message_text = f"Line - {user_name}: {event.message.text}"
+            
             # 發送到 Discord
             channel = bot.get_channel(int(DISCORD_CHANNEL_ID))
             if channel:
-                # 使用 create_task 而不是直接呼叫
-                discord.utils.get_running_loop().create_task(
-                    channel.send(f"Line - {event.message.text}")
+                # 使用異步方式發送訊息
+                future = asyncio.run_coroutine_threadsafe(
+                    channel.send(message_text),
+                    bot.loop
                 )
+                # 等待訊息發送完成
+                future.result()
+                print(f"已發送到 Discord: {message_text}")
+            
         except Exception as e:
             print(f"處理 Line 訊息時發生錯誤：{str(e)}")
+            print(f"錯誤類型：{type(e)}")
+            import traceback
+            print(f"錯誤追蹤：{traceback.format_exc()}")
 
 @handler.add(JoinEvent)
 def handle_join(event):
