@@ -50,14 +50,25 @@ async def on_message(message):
                 for group in line_groups['active_groups'].values():
                     if group and 'id' in group:
                         app.logger.info(f"發送訊息到群組：{group['id']}")
-                        line_bot_api.push_message(
-                            to=group['id'],
-                            messages=[TextMessage(text=f"Discord - {message.author.name}: {message.content}")]
-                        )
+                        try:
+                            # 直接使用 push_message 方法
+                            line_bot_api.push_message(
+                                to=group['id'],
+                                messages=[
+                                    TextMessage(
+                                        type='text',
+                                        text=f"Discord - {message.author.name}: {message.content}"
+                                    )
+                                ]
+                            )
+                            app.logger.info("訊息發送成功")
+                        except Exception as e:
+                            app.logger.error(f"發送訊息失敗：{str(e)}")
             else:
                 app.logger.warning("沒有活躍的 Line 群組")
         except Exception as e:
             app.logger.error(f"發送到 Line 時發生錯誤：{str(e)}")
+            app.logger.error(f"錯誤詳情：{type(e).__name__}")
 
 # Line -> Discord
 @app.route("/callback", methods=['POST'])
@@ -151,28 +162,17 @@ async def on_ready():
         channel = bot.get_channel(int(os.getenv('DISCORD_CHANNEL_ID')))
         if channel:
             await channel.send("機器人已上線！")
-            # 初始化預設群組
-            if os.getenv('LINE_GROUP_ID'):
-                try:
-                    group_summary = line_bot_api.get_group_summary(
-                        group_id=os.getenv('LINE_GROUP_ID')
-                    )
-                    line_groups['active_groups'][os.getenv('LINE_GROUP_ID')] = {
-                        'id': os.getenv('LINE_GROUP_ID'),
-                        'name': group_summary.group_name
-                    }
-                    await channel.send(f"已連接到 Line 群組：{group_summary.group_name}")
-                    app.logger.info(f"已初始化預設群組：{group_summary.group_name}")
-                except Exception as e:
-                    app.logger.error(f"初始化群組時發生錯誤：{str(e)}")
+            if line_groups['default']:
+                group_summary = line_bot_api.get_group_summary(group_id=line_groups['default'])
+                await channel.send(f"預設Line群組：{group_summary.group_name}")
     except Exception as e:
-        app.logger.error(f"機器人初始化時發生錯誤：{str(e)}")
+        print(f"初始化時發生錯誤：{str(e)}")
 
 # 啟動 Discord 機器人
 def run_discord_bot():
     bot.run(os.getenv('DISCORD_TOKEN'))
 
-# 新增一個測試路由
+# 新增��個測試路由
 @app.route("/callback", methods=['GET'])
 def callback_test():
     return 'Webhook is working!', 200
