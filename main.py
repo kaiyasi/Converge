@@ -45,7 +45,16 @@ class ChatState:
         self.histories = {}
         self.last_interaction = {}
         self.daily_usage = {}
-        self.last_message = {}  # 只記錄最後一條訊息
+        self.processing = set()  # 追蹤正在處理的訊息
+    
+    def is_processing(self, user_id):
+        return user_id in self.processing
+    
+    def start_processing(self, user_id):
+        self.processing.add(user_id)
+    
+    def end_processing(self, user_id):
+        self.processing.discard(user_id)
     
     def is_duplicate_message(self, user_id, message):
         # 檢查是否與上一條訊息完全相同
@@ -244,34 +253,50 @@ def handle_message(event):
         try:
             if event.source.type == 'user':
                 user_id = event.source.user_id
-                app.logger.info(f"收到私人訊息：{event.message.text}")
                 
-                profile = line_bot_api.get_profile(user_id)
-                user_name = profile.display_name
+                # 如果正在處理該用戶的訊息，直接返回
+                if chat_state.is_processing(user_id):
+                    return
                 
-                response = asyncio.run(get_ai_response(user_id, event.message.text))
+                chat_state.start_processing(user_id)
                 
-                request = PushMessageRequest(
-                    to=user_id,
-                    messages=[
-                        TextMessage(
-                            type='text',
-                            text=(
-                                "🤖 AI 助手\n"
-                                f"👋 Hi, {user_name}!\n"
-                                f"📝 {response}"
-                            )
+                try:
+                    app.logger.info(f"收到私人訊息：{event.message.text}")
+                    
+                    profile = line_bot_api.get_profile(user_id)
+                    user_name = profile.display_name
+                    
+                    response = asyncio.run(get_ai_response(user_id, event.message.text))
+                    
+                    # 只有在有回應時才發送
+                    if response:
+                        request = PushMessageRequest(
+                            to=user_id,
+                            messages=[
+                                TextMessage(
+                                    type='text',
+                                    text=(
+                                        "🤖 AI 助手\n"
+                                        f"👋 Hi, {user_name}!\n"
+                                        f"📝 {response}"
+                                    )
+                                )
+                            ]
                         )
-                    ]
-                )
-                line_bot_api.push_message(request)
-                app.logger.info(f"已發送 AI 回應給用戶：{user_id}")
+                        line_bot_api.push_message(request)
+                        app.logger.info(f"已發送 AI 回應給用戶：{user_id}")
                 
+                finally:
+                    # 確保一定會結束處理狀態
+                    chat_state.end_processing(user_id)
+                    
             elif event.source.type == 'group':
                 handle_group_message(event)
                 
         except Exception as e:
             app.logger.error(f"處理訊息時發生錯誤：{str(e)}")
+            if event.source.type == 'user':
+                chat_state.end_processing(event.source.user_id)
 
 def handle_group_message(event):
     try:
