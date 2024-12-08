@@ -1,49 +1,134 @@
 import os
+import json
+import time
 import asyncio
+import threading
+import tempfile
+import aiohttp
 from flask import Flask, request, abort
 from linebot.v3 import WebhookHandler
+from linebot.v3.messaging import MessagingApi, ApiClient, Configuration
+from linebot.v3.webhooks import MessageEvent, TextMessageContent
 from linebot.v3.messaging import (
-    MessagingApi, 
-    ApiClient, 
-    Configuration,
     PushMessageRequest,
-    TextMessage
+    TextMessage,
+    ImageMessage
 )
-from linebot.v3.webhooks import MessageEvent, TextMessageContent, JoinEvent, LeaveEvent
 from linebot.v3.exceptions import InvalidSignatureError
 import discord
 from discord.ext import commands
-import threading
+from openai import OpenAI
 
-# 修改全域字典，用來儲存所有 Line 群組資訊
-line_groups = {
-    'default': os.getenv('LINE_GROUP_ID'),
-    'active_groups': {
-        os.getenv('LINE_GROUP_ID'): {
-            'id': os.getenv('LINE_GROUP_ID'),
-            'name': 'Default Group'
-        }
-    } if os.getenv('LINE_GROUP_ID') else {}
-}
+# Flask 應用
+app = Flask(__name__)
 
-# 設定 Discord 機器人
+# Discord 設定
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-# 修改 Line Bot 設定
+# LINE Bot 設定
 configuration = Configuration(access_token=os.getenv('LINE_CHANNEL_ACCESS_TOKEN'))
 handler = WebhookHandler(os.getenv('LINE_CHANNEL_SECRET'))
 line_bot_api = MessagingApi(ApiClient(configuration))
 
-# 設定 Flask
-app = Flask(__name__)
+# OpenAI 設定
+client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
-@app.route("/", methods=['GET'])
-def hello():
-    return 'Bot is running!', 200
+# 全域變數
+line_groups = {
+    'default': os.getenv('LINE_GROUP_ID'),
+    'active_groups': {}
+}
 
-# Discord -> Line
+# 聊天狀態管理
+class ChatState:
+    def __init__(self):
+        self.histories = {}
+        self.last_interaction = {}
+    
+    def get_history(self, user_id):
+        current_time = time.time()
+        if user_id in self.last_interaction:
+            if current_time - self.last_interaction[user_id] > 1800:
+                self.histories[user_id] = []
+        
+        if user_id not in self.histories:
+            self.histories[user_id] = []
+        
+        self.last_interaction[user_id] = current_time
+        return self.histories[user_id]
+    
+    def add_message(self, user_id, role, content):
+        history = self.get_history(user_id)
+        history.append({"role": role, "content": content})
+        if len(history) > 10:
+            history = history[-10:]
+        self.histories[user_id] = history
+
+chat_state = ChatState()
+
+# AI 回應功能
+async def get_ai_response(user_id, message):
+    try:
+        chat_state.add_message(user_id, "user", message)
+        
+        messages = [
+            {"role": "system", "content": "你是一個友善的AI助手。請用繁體中文回答，並保持回答簡潔。"}
+        ] + chat_state.get_history(user_id)
+        
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=messages,
+            max_tokens=500,
+            temperature=0.7
+        )
+        
+        ai_response = response.choices[0].message.content
+        chat_state.add_message(user_id, "assistant", ai_response)
+        
+        return ai_response
+        
+    except Exception as e:
+        app.logger.error(f"AI 回應錯誤：{str(e)}")
+        return "抱歉，我現在無法回應。請稍後再試。"
+
+# Discord 事件處理
+@bot.event
+async def on_ready():
+    print(f'Discord 機器人已登入為 {bot.user}')
+    try:
+        channel = bot.get_channel(int(os.getenv('DISCORD_CHANNEL_ID')))
+        if channel:
+            await channel.send("🤖 機器人已上線！")
+            
+            if line_groups['default']:
+                try:
+                    group_summary = line_bot_api.get_group_summary(
+                        group_id=line_groups['default']
+                    )
+                    line_groups['active_groups'][line_groups['default']] = {
+                        'id': line_groups['default'],
+                        'name': group_summary.group_name
+                    }
+                    await channel.send(
+                        "```\n"
+                        "📱 LINE 群組設定\n"
+                        f"✅ 已連接到預設群組：{group_summary.group_name}\n"
+                        "```"
+                    )
+                    app.logger.info(f"已設定預設群組：{group_summary.group_name}")
+                except Exception as e:
+                    await channel.send(
+                        "```\n"
+                        "❌ LINE 群組設定失敗\n"
+                        f"錯誤：{str(e)}\n"
+                        "```"
+                    )
+                    app.logger.error(f"設定預設群組時發生錯誤：{str(e)}")
+    except Exception as e:
+        app.logger.error(f"機器人初始化時發生錯誤：{str(e)}")
+
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
@@ -54,109 +139,141 @@ async def on_message(message):
             if line_groups['active_groups']:
                 for group in line_groups['active_groups'].values():
                     if group and 'id' in group:
-                        app.logger.info(f"發送訊息到群組：{group['id']}")
-                        try:
-                            formatted_message = (
+                        messages = []
+                        
+                        if message.content:
+                            formatted_text = (
                                 "💬 Discord\n"
                                 f"👤 {message.author.name}\n"
                                 f"📝 {message.content}"
                             )
-                            
+                            messages.append(TextMessage(type='text', text=formatted_text))
+                        
+                        for attachment in message.attachments:
+                            if any(attachment.filename.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif']):
+                                try:
+                                    async with aiohttp.ClientSession() as session:
+                                        async with session.get(attachment.url) as resp:
+                                            if resp.status == 200:
+                                                with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+                                                    temp_file.write(await resp.read())
+                                                    temp_file_path = temp_file.name
+                                                
+                                                with open(temp_file_path, 'rb') as f:
+                                                    response = line_bot_api.upload_rich_menu_image(
+                                                        f.read(),
+                                                        'image/jpeg'
+                                                    )
+                                                    image_url = response.get('url')
+                                                    
+                                                    messages.append(ImageMessage(
+                                                        type='image',
+                                                        originalContentUrl=image_url,
+                                                        previewImageUrl=image_url
+                                                    ))
+                                                
+                                                os.unlink(temp_file_path)
+                                                
+                                except Exception as e:
+                                    app.logger.error(f"處理圖片時發生錯誤：{str(e)}")
+                        
+                        if messages:
                             request = PushMessageRequest(
                                 to=group['id'],
-                                messages=[TextMessage(type='text', text=formatted_message)]
+                                messages=messages
                             )
                             response = line_bot_api.push_message(request)
-                            app.logger.info(f"訊息發送成功：{response}")
-                        except Exception as e:
-                            app.logger.error(f"發送訊息失敗：{str(e)}")
+                            app.logger.info("訊息發送成功")
+                            
         except Exception as e:
-            app.logger.error(f"處理 Discord 訊息時發生錯誤：{str(e)}")
+            app.logger.error(f"發送到 Line 時發生錯誤：{str(e)}")
+
+# LINE Webhook 處理
+@app.route("/callback", methods=['POST'])
+def callback():
+    signature = request.headers.get('X-Line-Signature', '')
+    body = request.get_data(as_text=True)
+    app.logger.info(f"收到 webhook 請求")
+    
+    try:
+        handler.handle(body, signature)
+    except InvalidSignatureError:
+        app.logger.error(f"簽名驗證失敗")
+        app.logger.error(f"收到的簽名: {signature}")
+        abort(400)
+    except Exception as e:
+        app.logger.error(f"處理 webhook 時發生錯誤：{str(e)}")
+        return str(e), 500
+    
+    return 'OK', 200
 
 @handler.add(MessageEvent)
 def handle_message(event):
     if isinstance(event.message, TextMessageContent):
         try:
-            if event.source.type == 'group':
-                group_id = event.source.group_id
-                # 取得發送者資訊
-                profile = line_bot_api.get_group_member_profile(
-                    group_id=group_id,
-                    user_id=event.source.user_id
-                )
+            if event.source.type == 'user':
+                user_id = event.source.user_id
+                app.logger.info(f"收到私人訊息：{event.message.text}")
+                
+                profile = line_bot_api.get_profile(user_id)
                 user_name = profile.display_name
                 
-                # 發送到 Discord
-                channel = bot.get_channel(int(os.getenv('DISCORD_CHANNEL_ID')))
-                if channel:
-                    # 美化 Line 到 Discord 的訊息
-                    message_text = (
-                        "```\n"
-                        "📱 LINE\n"
-                        f"👤 {user_name}\n"
-                        f"📝 {event.message.text}\n"
-                        "```"
-                    )
-                    
-                    future = asyncio.run_coroutine_threadsafe(
-                        channel.send(message_text),
-                        bot.loop
-                    )
-                    future.result()
-                    app.logger.info(f"已發送到 Discord: {message_text}")
+                response = asyncio.run(get_ai_response(user_id, event.message.text))
+                
+                request = PushMessageRequest(
+                    to=user_id,
+                    messages=[
+                        TextMessage(
+                            type='text',
+                            text=(
+                                "🤖 AI 助手\n"
+                                f"👋 Hi, {user_name}!\n"
+                                f"📝 {response}"
+                            )
+                        )
+                    ]
+                )
+                line_bot_api.push_message(request)
+                app.logger.info(f"已發送 AI 回應給用戶：{user_id}")
+                
+            elif event.source.type == 'group':
+                handle_group_message(event)
                 
         except Exception as e:
-            app.logger.error(f"處理 Line 訊息時發生錯誤：{str(e)}")
+            app.logger.error(f"處理訊息時發生錯誤：{str(e)}")
 
-@handler.add(JoinEvent)
-def handle_join(event):
-    if event.source.type == 'group':
-        group_id = event.source.group_id
-        if group_id not in line_groups['active_groups']:
-            line_groups['active_groups'][group_id] = {
-                'id': group_id,
-                'name': line_bot_api.get_group_summary(group_id).group_name
-            }
-            print(f"已加入新群組：{group_id}")
-        else:
-            print(f"群組已存在：{group_id}")
-
-@handler.add(LeaveEvent)
-def handle_leave(event):
-    if event.source.type == 'group':
-        group_id = event.source.group_id
-        # 離開群組時從清單中移除
-        if group_id in line_groups['active_groups']:
-            del line_groups['active_groups'][group_id]
-            print(f"已離開群組：{group_id}")
-
-@bot.event
-async def on_ready():
-    print(f'Discord 機器人已登入為 {bot.user}')
+def handle_group_message(event):
     try:
+        group_id = event.source.group_id
+        profile = line_bot_api.get_group_member_profile(
+            group_id=group_id,
+            user_id=event.source.user_id
+        )
+        user_name = profile.display_name
+        
         channel = bot.get_channel(int(os.getenv('DISCORD_CHANNEL_ID')))
         if channel:
-            await channel.send("機器人已上線！")
-            if line_groups['default']:
-                group_summary = line_bot_api.get_group_summary(group_id=line_groups['default'])
-                await channel.send(f"���設Line群組：{group_summary.group_name}")
+            message_text = (
+                "```\n"
+                "📱 LINE\n"
+                f"👤 {user_name}\n"
+                f"📝 {event.message.text}\n"
+                "```"
+            )
+            
+            future = asyncio.run_coroutine_threadsafe(
+                channel.send(message_text),
+                bot.loop
+            )
+            future.result()
+            
     except Exception as e:
-        print(f"初始化時發生錯誤：{str(e)}")
+        app.logger.error(f"處理群組訊息時發生錯誤：{str(e)}")
 
-# 啟動 Discord 機器人
-def run_discord_bot():
-    bot.run(os.getenv('DISCORD_TOKEN'))
-
-# 新增一個測試路由
-@app.route("/callback", methods=['GET'])
-def callback_test():
-    return 'Webhook is working!', 200
-
+# 主程式
 if __name__ == "__main__":
-    # 啟動 Discord bot
-    discord_thread = threading.Thread(target=run_discord_bot, daemon=True)
+    discord_thread = threading.Thread(target=lambda: bot.run(os.getenv('DISCORD_TOKEN')), daemon=True)
     discord_thread.start()
     
-    # 啟動 Flask
     port = int(os.getenv('PORT', 8080))
-    app.run(host='0.0.0.0', port=port) 
+    app.run(host='0.0.0.0', port=port)
