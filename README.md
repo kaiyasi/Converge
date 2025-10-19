@@ -11,8 +11,6 @@
 [![Flask](https://img.shields.io/badge/Flask-3.0-black.svg)](https://flask.palletsprojects.com/)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-[English](./README_EN.md) | [繁體中文](./README.md)
-
 [功能特色](#-功能特色) • [快速開始](#-快速開始) • [文檔](#-文檔) • [貢獻](#-貢獻)
 
 </div>
