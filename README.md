@@ -453,10 +453,6 @@ black --check .
 * **:camera_with_flash: 官方 IG**: [SerelixStudio_IG](https://www.instagram.com/serelix_studio?igsh=eGM1anl3em1xaHZ6&utm_source=qr)
 * **:e_mail: 官方 Gmail**: [serelixstudio@gmail.com](mailto:serelixstudio@gmail.com)
 
-### :star: 專案連結
-* **:octocat: GitHub 專案**: [https://github.com/kaiyasi/Converge](https://github.com/kaiyasi/Converge)
-* **:book: 線上文檔**: [https://kaiyasi.github.io/Converge/docs](https://kaiyasi.github.io/Converge/docs)
-
 ---
 
 ## 🙏 致謝
