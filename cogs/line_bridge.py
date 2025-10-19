@@ -25,12 +25,26 @@ class LineBridge(commands.Cog):
         # 只處理指定頻道的訊息
         if message.channel.id == DISCORD_CHANNEL_ID:
             # 將 Discord 訊息轉發到 Line
-            try:
-                self.line_bot_api.broadcast(
-                    TextSendMessage(text=f"Discord - {message.author.name}: {message.content}")
+            from models.quota import SystemQuota
+            from models.queued_message import QueuedMessage
+
+            if SystemQuota.can_use('line_monthly'):
+                try:
+                    self.line_bot_api.broadcast(
+                        TextSendMessage(text=f"Discord - {message.author.name}: {message.content}")
+                    )
+                    SystemQuota.increment_usage('line_monthly')
+                except Exception as e:
+                    print(f"Error sending to LINE: {e}")
+            else:
+                # 配額不足，將訊息存入佇列
+                print("Line quota exceeded. Queuing message.")
+                queued_msg = QueuedMessage(
+                    source_platform='discord',
+                    source_user_name=message.author.name,
+                    content=message.content
                 )
-            except Exception as e:
-                print(f"Error sending to LINE: {e}")
+                queued_msg.save()
 
 async def setup(bot):
     await bot.add_cog(LineBridge(bot)) 

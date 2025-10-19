@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+
+{% block title %}使用者管理 - Converge{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1><i class="bi bi-people"></i> 使用者管理</h1>
+        <hr>
+    </div>
+</div>
+
+<!-- 篩選工具 -->
+<div class="row mb-3">
+    <div class="col-md-6">
+        <div class="input-group">
+            <span class="input-group-text"><i class="bi bi-search"></i></span>
+            <input type="text" class="form-control" id="search-input" placeholder="搜尋使用者 ID 或名稱...">
+        </div>
+    </div>
+    <div class="col-md-3">
+        <select class="form-select" id="platform-filter">
+            <option value="">所有平台</option>
+            <option value="line">Line</option>
+            <option value="discord">Discord</option>
+        </select>
+    </div>
+    <div class="col-md-3">
+        <button class="btn btn-primary w-100" onclick="loadUsers()">
+            <i class="bi bi-arrow-clockwise"></i> 重新載入
+        </button>
+    </div>
+</div>
+
+<!-- 使用者列表 -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-list"></i> 使用者列表</span>
+                <span class="badge bg-primary" id="user-count">0 位使用者</span>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>平台</th>
+                                <th>使用者 ID</th>
+                                <th>顯示名稱</th>
+                                <th>註冊時間</th>
+                                <th>狀態</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="users-table-body">
+                            <tr>
+                                <td colspan="6" class="text-center text-muted">載入中...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+async function loadUsers() {
+    const platform = document.getElementById('platform-filter').value;
+    const url = platform ? `/api/users?platform=${platform}` : '/api/users';
+
+    try {
+        const response = await fetch(url);
+        const data = await response.json();
+
+        const tbody = document.getElementById('users-table-body');
+        tbody.innerHTML = '';
+
+        if (data.users.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">沒有找到使用者</td></tr>';
+            return;
+        }
+
+        data.users.forEach(user => {
+            const row = document.createElement('tr');
+
+            const platformIcon = user.platform === 'line' ? 'bi-line' : 'bi-discord';
+            const statusBadge = user.is_active
+                ? '<span class="badge bg-success">活躍</span>'
+                : '<span class="badge bg-secondary">停用</span>';
+
+            row.innerHTML = `
+                <td><i class="bi ${platformIcon}"></i> ${user.platform.toUpperCase()}</td>
+                <td><code>${user.user_id.substring(0, 20)}...</code></td>
+                <td>${user.display_name || '<span class="text-muted">未設定</span>'}</td>
+                <td>${new Date(user.created_at).toLocaleString('zh-TW')}</td>
+                <td>${statusBadge}</td>
+                <td>
+                    <button class="btn btn-sm btn-info" onclick="viewUser('${user.user_id}', '${user.platform}')">
+                        <i class="bi bi-eye"></i> 詳情
+                    </button>
+                </td>
+            `;
+
+            tbody.appendChild(row);
+        });
+
+        document.getElementById('user-count').textContent = `${data.total} 位使用者`;
+
+    } catch (error) {
+        console.error('載入使用者失敗:', error);
+        document.getElementById('users-table-body').innerHTML =
+            '<tr><td colspan="6" class="text-center text-danger">載入失敗</td></tr>';
+    }
+}
+
+function viewUser(userId, platform) {
+    alert(`查看使用者詳情: ${userId} (${platform})\n此功能開發中...`);
+}
+
+// 頁面載入時執行
+document.addEventListener('DOMContentLoaded', loadUsers);
+
+// 平台篩選變更時重新載入
+document.getElementById('platform-filter').addEventListener('change', loadUsers);
+</script>
+{% endblock %}

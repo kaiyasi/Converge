@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block title %}系統設定 - Converge{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1><i class="bi bi-gear"></i> 系統設定</h1>
+        <hr>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-6">
+        <div class="card mb-4">
+            <div class="card-header">
+                <i class="bi bi-database"></i> 資料庫管理
+            </div>
+            <div class="card-body">
+                <button class="btn btn-primary mb-2" onclick="backupDatabase()">
+                    <i class="bi bi-cloud-arrow-down"></i> 備份資料庫
+                </button>
+                <button class="btn btn-warning mb-2" onclick="optimizeDatabase()">
+                    <i class="bi bi-arrow-repeat"></i> 優化資料庫
+                </button>
+                <button class="btn btn-danger" onclick="cleanOldMessages()">
+                    <i class="bi bi-trash"></i> 清理舊訊息 (30天前)
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card mb-4">
+            <div class="card-header">
+                <i class="bi bi-info-circle"></i> 系統資訊
+            </div>
+            <div class="card-body">
+                <table class="table table-sm">
+                    <tr>
+                        <th>版本</th>
+                        <td>v2.0.0</td>
+                    </tr>
+                    <tr>
+                        <th>Python 版本</th>
+                        <td id="python-version">-</td>
+                    </tr>
+                    <tr>
+                        <th>運行時間</th>
+                        <td id="uptime">-</td>
+                    </tr>
+                    <tr>
+                        <th>進程 ID</th>
+                        <td id="pid">-</td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function backupDatabase() {
+    alert('備份功能開發中...');
+}
+
+function optimizeDatabase() {
+    alert('優化功能開發中...');
+}
+
+function cleanOldMessages() {
+    if (confirm('確定要清理 30 天前的舊訊息嗎？')) {
+        alert('清理功能開發中...');
+    }
+}
+
+async function loadSystemInfo() {
+    try {
+        const response = await fetch('/api/system');
+        const data = await response.json();
+
+        document.getElementById('pid').textContent = data.process.pid;
+        document.getElementById('uptime').textContent = formatUptime(data.process.uptime_seconds);
+
+    } catch (error) {
+        console.error('載入系統資訊失敗:', error);
+    }
+}
+
+function formatUptime(seconds) {
+    const days = Math.floor(seconds / 86400);
+    const hours = Math.floor((seconds % 86400) / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    return `${days} 天 ${hours} 小時 ${minutes} 分鐘`;
+}
+
+document.addEventListener('DOMContentLoaded', loadSystemInfo);
+</script>
+{% endblock %}

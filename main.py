@@ -18,6 +18,7 @@ from linebot.v3.exceptions import InvalidSignatureError
 import discord
 from discord.ext import commands
 import google.generativeai as genai
+from config import config
 
 # Flask 應用
 app = Flask(__name__)
@@ -28,14 +29,14 @@ intents.message_content = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
 # LINE Bot 設定
-configuration = Configuration(access_token=os.getenv('LINE_CHANNEL_ACCESS_TOKEN'))
-handler = WebhookHandler(os.getenv('LINE_CHANNEL_SECRET'))
+configuration = Configuration(access_token=config.LINE_CHANNEL_ACCESS_TOKEN)
+handler = WebhookHandler(config.LINE_CHANNEL_SECRET)
 line_bot_api = MessagingApi(ApiClient(configuration))
 
 
 # 全域變數
 line_groups = {
-    'default': os.getenv('LINE_GROUP_ID'),
+    'default': config.LINE_GROUP_ID,
     'active_groups': {}
 }
 
@@ -50,6 +51,10 @@ class ChatState:
         self.line_quota_exceeded = False
         self.monthly_message_count = 0  # 追蹤每月訊息數
         self.monthly_reset_date = None  # 月重置日期
+        # 修復: 添加缺少的屬性初始化
+        self.request_count = 0
+        self.last_request_time = time.time()
+        self.quota_notice_sent = False
     
     def check_monthly_reset(self):
         # 檢查是否需要重置月計數
@@ -64,12 +69,13 @@ class ChatState:
         self.check_monthly_reset()
         self.monthly_message_count += 1
         # 接近限制時提前警告
-        if self.monthly_message_count >= 450:  # 90% 的限制
-            app.logger.warning(f"接近月訊息限制：{self.monthly_message_count}/500")
-        return self.monthly_message_count < 500
+        warning_threshold = int(config.LINE_MONTHLY_LIMIT * config.LINE_WARNING_THRESHOLD)
+        if self.monthly_message_count >= warning_threshold:
+            app.logger.warning(f"接近月訊息限制：{self.monthly_message_count}/{config.LINE_MONTHLY_LIMIT}")
+        return self.monthly_message_count < config.LINE_MONTHLY_LIMIT
 
     def get_remaining_quota(self):
-        return max(0, 500 - self.monthly_message_count)
+        return max(0, config.LINE_MONTHLY_LIMIT - self.monthly_message_count)
     
     def can_make_request(self):
         # 重置計數器（每分鐘）
@@ -77,9 +83,9 @@ class ChatState:
         if current_time - self.last_request_time >= 60:
             self.request_count = 0
             self.last_request_time = current_time
-        
-        # 檢查請求限制（每分鐘最多30次）
-        return self.request_count < 30
+
+        # 檢查請求限制
+        return self.request_count < config.AI_REQUEST_PER_MINUTE
     
     def increment_request(self):
         self.request_count += 1
@@ -89,10 +95,10 @@ class ChatState:
         if user_id in self.last_message:
             last_msg = self.last_message[user_id]
             # 如果兩條訊息長度相差不大且有高度重疊
-            if abs(len(message) - len(last_msg)) <= 5:
+            if abs(len(message) - len(last_msg)) <= config.MESSAGE_LENGTH_DIFF:
                 common_chars = sum(1 for a, b in zip(message, last_msg) if a == b)
                 similarity = common_chars / max(len(message), len(last_msg))
-                return similarity > 0.8
+                return similarity > config.MESSAGE_SIMILARITY_THRESHOLD
         return False
     
     def is_processing(self, user_id):
@@ -116,12 +122,12 @@ class ChatState:
         today = time.strftime('%Y-%m-%d')
         if today not in self.daily_usage:
             self.daily_usage = {today: {}}
-        
+
         if user_id not in self.daily_usage[today]:
             self.daily_usage[today][user_id] = 0
-            
-        # 設定每人每日限制次數（例如：20次）
-        return self.daily_usage[today][user_id] < 20
+
+        # 設定每人每日限制次數
+        return self.daily_usage[today][user_id] < config.AI_DAILY_LIMIT_PER_USER
     
     def increment_usage(self, user_id):
         today = time.strftime('%Y-%m-%d')
@@ -130,26 +136,26 @@ class ChatState:
     def get_history(self, user_id):
         current_time = time.time()
         if user_id in self.last_interaction:
-            if current_time - self.last_interaction[user_id] > 1800:
+            if current_time - self.last_interaction[user_id] > config.CONVERSATION_TIMEOUT:
                 self.histories[user_id] = []
-        
+
         if user_id not in self.histories:
             self.histories[user_id] = []
-        
+
         self.last_interaction[user_id] = current_time
         return self.histories[user_id]
-    
+
     def add_message(self, user_id, role, content):
         history = self.get_history(user_id)
         history.append({"role": role, "content": content})
-        if len(history) > 10:
-            history = history[-10:]
+        if len(history) > config.MAX_HISTORY_LENGTH:
+            history = history[-config.MAX_HISTORY_LENGTH:]
         self.histories[user_id] = history
 
 chat_state = ChatState()
 
 # 初始化 Gemini
-genai.configure(api_key=os.getenv('GOOGLE_API_KEY'))
+genai.configure(api_key=config.GOOGLE_API_KEY)
 model = genai.GenerativeModel('gemini-pro')
 
 # AI 回應功能
@@ -177,10 +183,10 @@ async def get_ai_response(user_id, message):
         response = model.generate_content(
             f"請用繁體中文回答以下問題，保持簡潔：\n{message}",
             generation_config={
-                "temperature": 0.7,
-                "top_p": 0.8,
-                "top_k": 40,
-                "max_output_tokens": 200,
+                "temperature": config.AI_TEMPERATURE,
+                "top_p": config.AI_TOP_P,
+                "top_k": config.AI_TOP_K,
+                "max_output_tokens": config.AI_MAX_TOKENS,
             }
         )
         
@@ -198,7 +204,7 @@ async def get_ai_response(user_id, message):
 async def on_ready():
     print(f'Discord 機器人已登入為 {bot.user}')
     try:
-        channel = bot.get_channel(int(os.getenv('DISCORD_CHANNEL_ID')))
+        channel = bot.get_channel(int(config.DISCORD_CHANNEL_ID))
         if channel:
             await channel.send("🤖 機器人已上線！")
             
@@ -234,7 +240,7 @@ async def on_message(message):
     if message.author == bot.user:
         return
     
-    if message.channel.id == int(os.getenv('DISCORD_CHANNEL_ID')):
+    if message.channel.id == int(config.DISCORD_CHANNEL_ID):
         try:
             if line_groups['active_groups']:
                 for group in line_groups['active_groups'].values():
@@ -248,30 +254,24 @@ async def on_message(message):
                         for attachment in message.attachments:
                             if any(attachment.filename.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif']):
                                 try:
-                                    async with aiohttp.ClientSession() as session:
-                                        async with session.get(attachment.url) as resp:
-                                            if resp.status == 200:
-                                                with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-                                                    temp_file.write(await resp.read())
-                                                    temp_file_path = temp_file.name
-                                                
-                                                with open(temp_file_path, 'rb') as f:
-                                                    response = line_bot_api.upload_rich_menu_image(
-                                                        f.read(),
-                                                        'image/jpeg'
-                                                    )
-                                                    image_url = response.get('url')
-                                                    
-                                                    messages.append(ImageMessage(
-                                                        type='image',
-                                                        originalContentUrl=image_url,
-                                                        previewImageUrl=image_url
-                                                    ))
-                                                
-                                                os.unlink(temp_file_path)
-                                                
+                                    # 修復: 直接使用 Discord 的圖片 URL
+                                    # Discord CDN URL 是公開可訪問的,不需要重新上傳
+                                    image_url = attachment.url
+
+                                    messages.append(ImageMessage(
+                                        type='image',
+                                        originalContentUrl=image_url,
+                                        previewImageUrl=image_url
+                                    ))
+                                    app.logger.info(f"已添加圖片訊息: {attachment.filename}")
+
                                 except Exception as e:
                                     app.logger.error(f"處理圖片時發生錯誤：{str(e)}")
+                                    # 如果圖片處理失敗,至少發送通知
+                                    messages.append(TextMessage(
+                                        type='text',
+                                        text=f"Discord - {message.author.name} 發送了圖片: {attachment.filename}"
+                                    ))
                         
                         if messages:
                             request = PushMessageRequest(
@@ -367,7 +367,7 @@ def handle_group_message(event):
         )
         user_name = profile.display_name
         
-        channel = bot.get_channel(int(os.getenv('DISCORD_CHANNEL_ID')))
+        channel = bot.get_channel(int(config.DISCORD_CHANNEL_ID))
         if channel:
             message_text = f"LINE - {user_name} - {event.message.text}"
             
@@ -382,8 +382,18 @@ def handle_group_message(event):
 
 # 主程式
 if __name__ == "__main__":
-    discord_thread = threading.Thread(target=lambda: bot.run(os.getenv('DISCORD_TOKEN')), daemon=True)
+    # 驗證配置
+    try:
+        config.validate()
+        print("✅ 配置驗證通過")
+    except ValueError as e:
+        print(f"❌ 配置錯誤: {e}")
+        exit(1)
+
+    # 啟動 Discord 機器人
+    discord_thread = threading.Thread(target=lambda: bot.run(config.DISCORD_TOKEN), daemon=True)
     discord_thread.start()
-    
-    port = int(os.getenv('PORT', 8080))
-    app.run(host='0.0.0.0', port=port)
+
+    # 啟動 Flask 伺服器
+    print(f"🚀 啟動 Flask 伺服器 (Host: {config.HOST}, Port: {config.PORT})")
+    app.run(host=config.HOST, port=config.PORT, debug=config.DEBUG)

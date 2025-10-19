@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+
+{% block title %}訊息記錄 - Converge{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1><i class="bi bi-chat-dots"></i> 訊息記錄</h1>
+        <hr>
+    </div>
+</div>
+
+<!-- 搜尋工具 -->
+<div class="row mb-3">
+    <div class="col-md-8">
+        <div class="input-group">
+            <span class="input-group-text"><i class="bi bi-search"></i></span>
+            <input type="text" class="form-control" id="keyword-input" placeholder="搜尋訊息內容...">
+            <button class="btn btn-primary" onclick="searchMessages()">搜尋</button>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <select class="form-select" id="platform-filter">
+            <option value="">所有平台</option>
+            <option value="line">Line</option>
+            <option value="discord">Discord</option>
+        </select>
+    </div>
+    <div class="col-md-2">
+        <button class="btn btn-success w-100" onclick="exportMessages()">
+            <i class="bi bi-download"></i> 匯出
+        </button>
+    </div>
+</div>
+
+<!-- 訊息列表 -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-list"></i> 最近訊息
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>時間</th>
+                                <th>平台</th>
+                                <th>使用者 ID</th>
+                                <th>類型</th>
+                                <th>內容</th>
+                            </tr>
+                        </thead>
+                        <tbody id="messages-table-body">
+                            <tr>
+                                <td colspan="5" class="text-center text-muted">載入中...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+async function loadMessages() {
+    try {
+        const response = await fetch('/api/messages?limit=100');
+        const data = await response.json();
+
+        const tbody = document.getElementById('messages-table-body');
+        tbody.innerHTML = '';
+
+        if (data.messages.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">沒有訊息記錄</td></tr>';
+            return;
+        }
+
+        data.messages.forEach(msg => {
+            const row = document.createElement('tr');
+
+            const typeIcons = {
+                'text': 'bi-chat-text',
+                'image': 'bi-image',
+                'video': 'bi-camera-video',
+                'audio': 'bi-mic',
+                'file': 'bi-file-earmark'
+            };
+            const typeIcon = typeIcons[msg.message_type] || 'bi-question';
+
+            const content = msg.content || '';
+            const displayContent = content.length > 50 ? content.substring(0, 50) + '...' : content;
+
+            row.innerHTML = `
+                <td><small>${new Date(msg.created_at).toLocaleString('zh-TW')}</small></td>
+                <td><span class="badge bg-${msg.platform === 'line' ? 'success' : 'primary'}">${msg.platform.toUpperCase()}</span></td>
+                <td><code>${msg.user_id.substring(0, 10)}...</code></td>
+                <td><i class="bi ${typeIcon}"></i> ${msg.message_type}</td>
+                <td>${displayContent}</td>
+            `;
+
+            tbody.appendChild(row);
+        });
+
+    } catch (error) {
+        console.error('載入訊息失敗:', error);
+        document.getElementById('messages-table-body').innerHTML =
+            '<tr><td colspan="5" class="text-center text-danger">載入失敗</td></tr>';
+    }
+}
+
+async function searchMessages() {
+    const keyword = document.getElementById('keyword-input').value;
+    const platform = document.getElementById('platform-filter').value;
+
+    if (!keyword) {
+        loadMessages();
+        return;
+    }
+
+    try {
+        let url = `/api/messages?keyword=${encodeURIComponent(keyword)}`;
+        if (platform) {
+            url += `&platform=${platform}`;
+        }
+
+        const response = await fetch(url);
+        const data = await response.json();
+
+        const tbody = document.getElementById('messages-table-body');
+        tbody.innerHTML = '';
+
+        if (data.messages.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">沒有找到符合的訊息</td></tr>';
+            return;
+        }
+
+        data.messages.forEach(msg => {
+            const row = document.createElement('tr');
+
+            const content = msg.content || '';
+            const displayContent = content.length > 50 ? content.substring(0, 50) + '...' : content;
+
+            row.innerHTML = `
+                <td><small>${new Date(msg.created_at).toLocaleString('zh-TW')}</small></td>
+                <td><span class="badge bg-${msg.platform === 'line' ? 'success' : 'primary'}">${msg.platform.toUpperCase()}</span></td>
+                <td><code>${msg.user_id.substring(0, 10)}...</code></td>
+                <td>${msg.message_type}</td>
+                <td>${displayContent}</td>
+            `;
+
+            tbody.appendChild(row);
+        });
+
+    } catch (error) {
+        console.error('搜尋訊息失敗:', error);
+    }
+}
+
+function exportMessages() {
+    alert('匯出功能開發中...');
+}
+
+// 頁面載入時執行
+document.addEventListener('DOMContentLoaded', loadMessages);
+</script>
+{% endblock %}

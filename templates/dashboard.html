@@ -1,0 +1,277 @@
+{% extends "base.html" %}
+
+{% block title %}儀表板 - Converge{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1><i class="bi bi-speedometer2"></i> 系統儀表板</h1>
+        <hr>
+    </div>
+</div>
+
+<!-- 統計卡片 -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card text-white bg-primary">
+            <div class="card-body">
+                <h5 class="card-title"><i class="bi bi-people"></i> 總使用者數</h5>
+                <h2 class="card-text" id="total-users">-</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-white bg-success">
+            <div class="card-body">
+                <h5 class="card-title"><i class="bi bi-chat-dots"></i> 總訊息數</h5>
+                <h2 class="card-text" id="total-messages">-</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-white bg-info">
+            <div class="card-body">
+                <h5 class="card-title"><i class="bi bi-clock"></i> 今日訊息</h5>
+                <h2 class="card-text" id="today-messages">-</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-white bg-warning">
+            <div class="card-body">
+                <h5 class="card-title"><i class="bi bi-database"></i> 資料庫大小</h5>
+                <h2 class="card-text" id="db-size">-</h2>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 圖表區域 -->
+<div class="row mb-4">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-graph-up"></i> 每日訊息統計 (最近7天)
+            </div>
+            <div class="card-body">
+                <canvas id="dailyMessagesChart"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-pie-chart"></i> 平台分布
+            </div>
+            <div class="card-body">
+                <canvas id="platformChart"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 系統狀態 -->
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-cpu"></i> 系統資源
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label">CPU 使用率</label>
+                    <div class="progress">
+                        <div class="progress-bar" id="cpu-progress" role="progressbar" style="width: 0%">0%</div>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">記憶體使用率</label>
+                    <div class="progress">
+                        <div class="progress-bar bg-success" id="memory-progress" role="progressbar" style="width: 0%">0%</div>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">磁碟使用率</label>
+                    <div class="progress">
+                        <div class="progress-bar bg-info" id="disk-progress" role="progressbar" style="width: 0%">0%</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-bar-chart"></i> API 配額狀態
+            </div>
+            <div class="card-body" id="quota-status">
+                <p class="text-muted">載入中...</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Discord Bot 狀態 -->
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-discord"></i> Discord Bot 狀態
+            </div>
+            <div class="card-body">
+                <table class="table table-sm">
+                    <tr>
+                        <th>狀態</th>
+                        <td id="discord-ready">-</td>
+                    </tr>
+                    <tr>
+                        <th>延遲</th>
+                        <td id="discord-latency">-</td>
+                    </tr>
+                    <tr>
+                        <th>使用者</th>
+                        <td id="discord-user">-</td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// 載入統計數據
+async function loadStats() {
+    try {
+        const response = await fetch('/api/stats');
+        const data = await response.json();
+
+        // 更新統計卡片
+        document.getElementById('total-users').textContent = data.database.total_users.toLocaleString();
+        document.getElementById('total-messages').textContent = data.database.total_messages.toLocaleString();
+        document.getElementById('today-messages').textContent = data.today.messages.toLocaleString();
+        document.getElementById('db-size').textContent = data.database.db_size_mb + ' MB';
+
+        // 更新配額狀態
+        let quotaHtml = '';
+        data.quotas.forEach(quota => {
+            const percentage = (quota.usage_count / quota.limit_count * 100).toFixed(1);
+            const colorClass = percentage > 90 ? 'danger' : (percentage > 70 ? 'warning' : 'success');
+            quotaHtml += `
+                <div class="mb-2">
+                    <label class="form-label">${quota.quota_type.toUpperCase()}</label>
+                    <div class="progress">
+                        <div class="progress-bar bg-${colorClass}" role="progressbar" style="width: ${percentage}%">
+                            ${quota.usage_count} / ${quota.limit_count} (${percentage}%)
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        document.getElementById('quota-status').innerHTML = quotaHtml;
+
+    } catch (error) {
+        console.error('載入統計數據失敗:', error);
+    }
+}
+
+// 載入系統資訊
+async function loadSystemInfo() {
+    try {
+        const response = await fetch('/api/system');
+        const data = await response.json();
+
+        // 更新系統資源
+        const cpu = data.system.cpu_percent.toFixed(1);
+        const memory = data.system.memory_percent.toFixed(1);
+        const disk = data.system.disk_percent.toFixed(1);
+
+        document.getElementById('cpu-progress').style.width = cpu + '%';
+        document.getElementById('cpu-progress').textContent = cpu + '%';
+
+        document.getElementById('memory-progress').style.width = memory + '%';
+        document.getElementById('memory-progress').textContent = memory + '%';
+
+        document.getElementById('disk-progress').style.width = disk + '%';
+        document.getElementById('disk-progress').textContent = disk + '%';
+
+        // 更新 Discord 狀態
+        document.getElementById('discord-ready').innerHTML = data.discord.ready
+            ? '<span class="badge bg-success">已連接</span>'
+            : '<span class="badge bg-danger">未連接</span>';
+        document.getElementById('discord-latency').textContent = data.discord.latency ? data.discord.latency + ' ms' : '-';
+        document.getElementById('discord-user').textContent = data.discord.user || '-';
+
+    } catch (error) {
+        console.error('載入系統資訊失敗:', error);
+    }
+}
+
+// 載入圖表數據
+async function loadCharts() {
+    try {
+        const response = await fetch('/api/stats/chart?days=7');
+        const data = await response.json();
+
+        // 每日訊息圖表
+        const dailyCtx = document.getElementById('dailyMessagesChart').getContext('2d');
+        new Chart(dailyCtx, {
+            type: 'line',
+            data: {
+                labels: data.daily_messages.map(d => d.date),
+                datasets: [{
+                    label: '訊息數量',
+                    data: data.daily_messages.map(d => d.count),
+                    borderColor: 'rgb(75, 192, 192)',
+                    tension: 0.1
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        display: true
+                    }
+                }
+            }
+        });
+
+        // 平台分布圖表
+        const platformCtx = document.getElementById('platformChart').getContext('2d');
+        new Chart(platformCtx, {
+            type: 'doughnut',
+            data: {
+                labels: data.platform_distribution.map(d => d.platform),
+                datasets: [{
+                    data: data.platform_distribution.map(d => d.count),
+                    backgroundColor: [
+                        'rgb(54, 162, 235)',
+                        'rgb(255, 99, 132)',
+                        'rgb(255, 205, 86)'
+                    ]
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true
+            }
+        });
+
+    } catch (error) {
+        console.error('載入圖表數據失敗:', error);
+    }
+}
+
+// 頁面載入時執行
+document.addEventListener('DOMContentLoaded', function() {
+    loadStats();
+    loadSystemInfo();
+    loadCharts();
+
+    // 每 30 秒更新一次
+    setInterval(() => {
+        loadStats();
+        loadSystemInfo();
+    }, 30000);
+});
+</script>
+{% endblock %}

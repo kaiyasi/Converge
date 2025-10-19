@@ -6,3 +6,4 @@ line-bot-sdk>=3.5.1
 google-generativeai>=0.3.2
 python-dotenv>=1.0.0
 requests>=2.31.0
+psutil>=5.9.0

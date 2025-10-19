@@ -1,0 +1,84 @@
+/* Converge Dashboard 樣式 */
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: #f8f9fa;
+}
+
+.navbar {
+    box-shadow: 0 2px 4px rgba(0,0,0,.1);
+}
+
+.card {
+    border-radius: 10px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.05);
+    margin-bottom: 1.5rem;
+}
+
+.card-header {
+    background-color: #fff;
+    border-bottom: 1px solid #e9ecef;
+    font-weight: 600;
+}
+
+/* 統計卡片 */
+.card.bg-primary,
+.card.bg-success,
+.card.bg-info,
+.card.bg-warning {
+    border: none;
+    border-radius: 10px;
+    box-shadow: 0 4px 6px rgba(0,0,0,.1);
+}
+
+.card.bg-primary:hover,
+.card.bg-success:hover,
+.card.bg-info:hover,
+.card.bg-warning:hover {
+    transform: translateY(-2px);
+    transition: transform 0.2s;
+}
+
+/* 表格 */
+.table-hover tbody tr:hover {
+    background-color: #f8f9fa;
+}
+
+code {
+    background-color: #f8f9fa;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 0.9em;
+}
+
+/* 進度條 */
+.progress {
+    height: 25px;
+    border-radius: 5px;
+}
+
+.progress-bar {
+    font-size: 0.9em;
+    font-weight: 600;
+}
+
+/* 按鈕 */
+.btn {
+    border-radius: 5px;
+}
+
+/* 狀態指示器 */
+#status-indicator {
+    cursor: default;
+}
+
+/* 響應式 */
+@media (max-width: 768px) {
+    .card.text-white h2 {
+        font-size: 1.5rem;
+    }
+
+    .card.text-white h5 {
+        font-size: 0.9rem;
+    }
+}
