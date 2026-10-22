@@ -4,7 +4,7 @@
 
 **Line 與 Discord 跨平台訊息橋接機器人**
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: KYL Open](https://img.shields.io/badge/License-KYL%20Open-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
 [![Discord.py](https://img.shields.io/badge/Discord.py-2.0+-7289DA.svg)](https://discordpy.readthedocs.io/)
 [![Line SDK](https://img.shields.io/badge/Line_SDK-3.0+-00C300.svg)](https://developers.line.biz/)
@@ -429,7 +429,7 @@ black --check .
 
 ## 📄 授權
 
-本專案採用 [MIT 授權條款](./LICENSE)。
+本專案採用 [KYL Open 授權條款](./LICENSE)。
 
 ---
 
@@ -474,3 +474,6 @@ Converge by kaiyasi - 跨平台訊息橋接機器人 🔗 讓溝通更簡單
 [⬆ 回到頂部](#-converge)
 
 </div>
+
+
+See [LICENSING.md](LICENSING.md) for license scope, third-party exceptions, and earlier-version notices.
